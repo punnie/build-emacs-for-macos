@@ -107,7 +107,7 @@ class Build
     handle_native_lisp(app)
     add_cli_helper(app)
 
-    LibEmbedder.new(app, brew_dir, extra_libs, options[:relink_eln]).embed
+    LibEmbedder.new(app, ports_dir, extra_libs, options[:relink_eln]).embed
     GccLibEmbedder.new(app, gcc_info).embed if options[:native_comp]
 
     archive_build(build_dir) if options[:archive]
@@ -148,22 +148,22 @@ class Build
     @output_dir ||= (options[:output] || File.join(root_dir, 'builds'))
   end
 
-  def brew_dir
-    @brew_dir ||= `brew --prefix`.chomp
+  def ports_dir
+    @ports_dir ||= '/opt/local'
   end
 
   def extra_libs
     return @extra_libs if @extra_libs
 
     libs = [
-      File.join(brew_dir, 'opt/expat/lib/libexpat.1.dylib'),
-      File.join(brew_dir, 'opt/libiconv/lib/libiconv.2.dylib'),
-      File.join(brew_dir, 'opt/zlib/lib/libz.1.dylib')
+      File.join(ports_dir, 'lib/libexpat.1.dylib'),
+      File.join(ports_dir, 'lib/libiconv.2.dylib'),
+      File.join(ports_dir, 'lib/libz.1.dylib')
     ]
 
     if options[:native_comp]
       libgcc_s = File.join(
-        brew_dir, 'lib', 'gcc', gcc_info.major_version, 'libgcc_s.1.dylib'
+        ports_dir, 'lib', "gcc#{gcc_info.major_version}", 'libgcc_s.1.dylib'
       )
       libs << libgcc_s if File.exist?(libgcc_s)
     end
@@ -283,13 +283,12 @@ class Build
       if options[:native_comp]
         info 'Compiling with native-comp enabled'
         verify_native_comp
-        gcc_info.verify_libgccjit
+        # gcc_info.verify_libgccjit
 
         apply_native_comp_env_setup_patch(source)
 
         ENV['CFLAGS'] = [
-          "-I#{File.join(gcc_info.root_dir, 'include')}",
-          "-I#{File.join(gcc_info.libgccjit_root_dir, 'include')}",
+          "-I#{File.join(gcc_info.header_dir)}",
           '-O2',
           (options[:native_march] ? '-march=native' : nil),
           ENV['CFLAGS']
@@ -298,9 +297,7 @@ class Build
         ENV['LDFLAGS'] = [
           "-L#{gcc_info.lib_dir}",
           "-L#{gcc_info.darwin_lib_dir}",
-          "-L#{gcc_info.libgccjit_lib_dir}",
-          "-I#{File.join(gcc_info.root_dir, 'include')}",
-          "-I#{File.join(gcc_info.libgccjit_root_dir, 'include')}",
+          "-I#{File.join(gcc_info.header_dir)}",
           # Ensure library re-linking and code signing will work after building.
           '-Wl,-headerpad_max_install_names',
           ENV['LDFLAGS']
@@ -309,30 +306,19 @@ class Build
         ENV['LIBRARY_PATH'] = [
           gcc_info.lib_dir,
           gcc_info.darwin_lib_dir,
-          gcc_info.libgccjit_lib_dir,
           ENV['LIBRARY_PATH']
         ].compact.join(':')
       end
 
       ENV['CC'] = 'clang'
       ENV['PKG_CONFIG_PATH'] = [
-        File.join(brew_dir, 'lib/pkgconfig'),
-        File.join(brew_dir, 'share/pkgconfig'),
-        File.join(brew_dir, 'opt/expat/lib/pkgconfig'),
-        File.join(brew_dir, 'opt/libxml2/lib/pkgconfig'),
-        File.join(brew_dir, 'opt/ncurses/lib/pkgconfig'),
-        File.join(brew_dir, 'opt/zlib/lib/pkgconfig'),
-        File.join(brew_dir, 'Homebrew/Library/Homebrew/os/mac/pkgconfig',
-                  OS.version.to_s),
+        File.join(ports_dir, 'lib/pkgconfig'),
+        File.join(ports_dir, 'share/pkgconfig'),
         ENV['PKG_CONFIG_PATH']
       ].compact.join(':')
 
       ENV['PATH'] = [
-        File.join(brew_dir, 'opt/make/libexec/gnubin'),
-        File.join(brew_dir, 'opt/coreutils/libexec/gnubin'),
-        File.join(brew_dir, 'opt/gnu-sed/libexec/gnubin'),
-        File.join(brew_dir, 'bin'),
-        File.join(brew_dir, 'opt/texinfo/bin'),
+        File.join(ports_dir, 'bin'),
         ENV['PATH']
       ].compact.join(':')
 
@@ -924,18 +910,19 @@ class GccInfo
   include Output
 
   def root_dir
-    @root_dir ||= `brew --prefix gcc`.chomp
+    @root_dir ||= '/opt/local/'
   end
 
   def major_version
-    @major_version ||= File.basename(lib_dir)
+    @major_version ||= '10'
   end
 
   def lib_dir
-    @lib_dir ||= Dir[File.join(root_dir, 'lib/gcc/*/libgcc*')]
-                 .map { |path| File.dirname(path) }
-                 .select { |path| File.basename(path).match(/^\d+$/) }
-                 .max_by { |path| File.basename(path).to_i }
+    @lib_dir ||= root_dir + 'lib/gcc10'
+  end
+
+  def header_dir
+    @header_dir ||= root_dir + 'include/gcc10'
   end
 
   def relative_lib_dir
@@ -980,43 +967,6 @@ class GccInfo
       File.join(embedder.lib_dir, sanitized_relative_darwin_lib_dir),
       embedder.invocation_dir
     )
-  end
-
-  def libgccjit_root_dir
-    @libgccjit_root_dir ||= `brew --prefix libgccjit`.chomp
-  end
-
-  def libgccjit_major_version
-    @libgccjit_major_version ||= File.basename(libgccjit_lib_dir.to_s)
-  end
-
-  def libgccjit_lib_dir
-    @libgccjit_lib_dir ||= Dir[
-      File.join(libgccjit_root_dir, 'lib/gcc/*/libgccjit.so*')
-    ]
-                           .map { |path| File.dirname(path) }
-                           .select { |path| File.basename(path).match(/^\d+$/) }
-                           .max_by { |path| File.basename(path).to_i }
-  end
-
-  def verify_libgccjit
-    err 'gcc not installed' unless Dir.exist?(root_dir)
-    err 'libgccjit not installed' unless Dir.exist?(libgccjit_root_dir)
-
-    if libgccjit_lib_dir&.empty?
-      err "Detected libgccjit (#{libgccjit_root_dir}) does not have any " \
-          'libgccjit.so* files. Please try reinstalling libgccjit: ' \
-          'brew reinstall libgccjit'
-    end
-
-    return if major_version == libgccjit_major_version
-
-    err <<~TEXT
-      Detected GCC and libgccjit library paths do not belong to the same major
-      version of GCC. Detected paths:
-        - #{lib_dir}
-        - #{libgccjit_lib_dir}
-    TEXT
   end
 
   def get_binding
