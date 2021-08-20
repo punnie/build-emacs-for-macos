@@ -10,12 +10,6 @@ Use this script at your own risk.
 
 - To use new features available from master or branches, which have not made it
   into a official stable release yet.
-- Homebrew builds of Emacs are not self-contained applications, making it very
-  difficult when doing HEAD builds and you need to rollback to a earlier
-  version.
-- Both Homebrew HEAD builds, and nightly builds from emacsformacosx.com are
-  built from the `master` branch. This script allows you to choose any branch,
-  tag, or git ref you want.
 
 ## Status
 
@@ -53,17 +47,16 @@ from [jimeh/emacs-builds](https://github.com/jimeh/emacs-builds).
 ## Requirements
 
 - [Xcode](https://apps.apple.com/gb/app/xcode/id497799835?mt=12)
-- [Homebrew](https://brew.sh/)
-- All Homebrew formula listed in the `Brewfile`, which can all easily be
-  installed by running:
-  ```
-  brew bundle
-  ```
+- [MacPorts](https://www.macports.org/)
+- The following ports:
+```
+  port install autoconf coreutils curl expat gcc10 gmp gnutls gsed jansson libffi libiconv librsvg libtasn1 libunistring libxml2 lcms2 mailutils gmake ncurses nettle pkgconfig texinfo zlib
+```
 - Ruby 2.3.0 or later is needed to execute the build script itself. macOS comes
   with Ruby, check your version with `ruby --version`. If it's too old, you can
   install a newer version with:
   ```
-  brew install ruby
+  port install ruby27
   ```
 
 ## Usage
@@ -230,9 +223,7 @@ The script downloads the source code as a gzipped tar archive from the
 it very easy to get a tarball of any given git reference.
 
 It then runs `./configure` with a various options, including copying various
-dynamic libraries into the application itself. So the built application should
-in theory run on a macOS install that does not have Homebrew, or does not have
-the relevant Homebrew formulas installed.
+dynamic libraries into the application itself. 
 
 Code quality of the script itself, is well, non-existent. The build script
 started life a super-quick hack back in 2013, and now it's even more of a dirty
